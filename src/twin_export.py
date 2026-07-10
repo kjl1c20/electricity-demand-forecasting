@@ -174,13 +174,9 @@ def render_twin_section(run_query, site_row, height: int = 720) -> None:
             "then add chargers or grid capacity and watch saturation change."
         )
         data = json.dumps(payload)
-        # Cache-buster: GitHub Pages serves demo.html with a ~10-minute cache
-        # and iframes cling to it — a changing query param forces a fresh fetch
-        # each dashboard session without affecting the twin itself.
-        twin_url = f"{TWIN_URL}?v={int(datetime.now(timezone.utc).timestamp()) // 600}"
         components.html(
             f"""
-            <iframe id="twin" src="{twin_url}"
+            <iframe id="twin" src="{TWIN_URL}"
                     style="width:100%;height:{height - 20}px;border:0;border-radius:8px"></iframe>
             <script>
               const twin = document.getElementById("twin");
