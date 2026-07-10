@@ -28,9 +28,6 @@ TWIN_URL = os.getenv(
 PROFILE_TABLE = os.getenv(
     "GOLD_SITE_HOURLY_PROFILE_TABLE", "chargepoint_analysis.gold.site_hourly_profile"
 )
-ECONOMICS_TABLE = os.getenv(
-    "GOLD_SITE_ECONOMICS_TABLE", "chargepoint_analysis.gold.site_economics"
-)
 CP_TABLE = os.getenv("SILVER_CP_TABLE", "chargepoint_analysis.silver.charge_points")
 
 # max_charge_rate_kw is nullable in Silver — fall back by connector type
@@ -57,25 +54,15 @@ def build_site_profile_json(run_query, site_row) -> dict | None:
     Returns None when the site has no profile rows (e.g. unmapped cp_ids —
     the known geocoding gap) or no connector detail.
     """
-    has_kw = True
     try:
         prof = run_query(f"""
-            SELECT day_type, hour, mean_utilization, p90_utilization, mean_kw, p90_kw
+            SELECT day_type, hour, mean_utilization, p90_utilization
             FROM {PROFILE_TABLE}
             WHERE site_key = '{_esc(site_row["site_key"])}'
         """)
     except Exception:
-        # Older Gold table without kW columns — retry without them
-        has_kw = False
-        try:
-            prof = run_query(f"""
-                SELECT day_type, hour, mean_utilization, p90_utilization
-                FROM {PROFILE_TABLE}
-                WHERE site_key = '{_esc(site_row["site_key"])}'
-            """)
-        except Exception:
-            # Gold profile table not built yet — degrade to the info message
-            return None
+        # Gold profile table not built yet — degrade to the info message
+        return None
     if prof.empty:
         return None
 
@@ -85,44 +72,13 @@ def build_site_profile_json(run_query, site_row) -> dict | None:
         if d.empty:
             continue
         mean, p90 = [0.0] * 24, [0.0] * 24
-        mean_kw, p90_kw = [0.0] * 24, [0.0] * 24
         for _, r in d.iterrows():
             h = int(r["hour"])
             mean[h] = _clamp01(r["mean_utilization"])
             p90[h] = _clamp01(r["p90_utilization"])
-            if has_kw:
-                mean_kw[h] = round(max(float(r["mean_kw"] or 0.0), 0.0), 2)
-                p90_kw[h] = round(max(float(r["p90_kw"] or 0.0), 0.0), 2)
         profiles[day] = {"mean": mean, "p90": p90}
-        if has_kw:
-            profiles[day]["mean_kw"] = mean_kw
-            profiles[day]["p90_kw"] = p90_kw
     if not profiles:
         return None
-
-    # economics (optional — omit block entirely if table missing)
-    economics = None
-    try:
-        e = run_query(f"""
-            SELECT avg_session_revenue, avg_session_energy_kwh, avg_session_minutes,
-                   sessions_per_weekday, sessions_per_weekend
-            FROM {ECONOMICS_TABLE}
-            WHERE site_key = '{_esc(site_row["site_key"])}'
-        """)
-        if not e.empty:
-            r = e.iloc[0]
-            num = lambda v: round(float(v), 2) if pd.notna(v) and float(v) >= 0 else None
-            economics = {
-                "avg_session_revenue": num(r["avg_session_revenue"]),
-                "avg_session_energy_kwh": num(r["avg_session_energy_kwh"]),
-                "avg_session_minutes": num(r["avg_session_minutes"]),
-                "sessions_per_day": {
-                    "weekday": num(r["sessions_per_weekday"]),
-                    "weekend": num(r["sessions_per_weekend"]),
-                },
-            }
-    except Exception:
-        pass
 
     ch = run_query(f"""
         SELECT cp_id, connector_id, connector_type, max_charge_rate_kw
@@ -143,7 +99,7 @@ def build_site_profile_json(run_query, site_row) -> dict | None:
         })
 
     name = site_row["site_name"]
-    payload = {
+    return {
         "version": 1,
         "site_id": str(site_row["site_key"]),
         "site_name": str(name) if pd.notna(name) else "Unnamed site",
@@ -152,9 +108,6 @@ def build_site_profile_json(run_query, site_row) -> dict | None:
         "chargers": chargers,
         "profiles": profiles,
     }
-    if economics is not None:
-        payload["economics"] = economics
-    return payload
 
 
 def render_twin_section(run_query, site_row, height: int = 720) -> None:
