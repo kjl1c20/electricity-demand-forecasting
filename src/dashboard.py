@@ -20,8 +20,6 @@ import streamlit as st
 from databricks import sql as dbsql
 from dotenv import load_dotenv
 
-from twin_export import render_twin_section
-
 load_dotenv(override=True)
 
 st.set_page_config(page_title="Scotland EV Charging — Planning", layout="wide")
@@ -432,8 +430,6 @@ def map_and_detail():
     if site_row is not None:
         st.markdown("")
         render_site_profiles(site_row, bundle)
-        st.markdown("")
-        render_twin_section(run_query, site_row)
 
 
 sites = load_sites()
